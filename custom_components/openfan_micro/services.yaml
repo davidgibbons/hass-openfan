@@ -1,88 +1,237 @@
+# Services for OpenFAN Micro integration
+
 led_set:
-  name: LED set
-  description: Turn the device status LED on or off (if supported by firmware).
+  name: Set LED
+  description: Enable or disable the activity LED on the OpenFAN device.
   fields:
     entity_id:
+      name: Fan Entity
+      description: The fan entity to control.
       required: true
-      selector: { entity: { domain: fan } }
+      selector:
+        entity:
+          domain: fan
+          integration: openfan_micro
     enabled:
+      name: Enabled
+      description: Whether to enable (true) or disable (false) the LED.
       required: true
-      selector: { boolean: {} }
+      selector:
+        boolean:
 
 set_voltage:
-  name: Set fan supply voltage
-  description: Switch 5V/12V if the firmware supports it.
+  name: Set Voltage
+  description: Set the fan supply voltage (5V or 12V).
   fields:
     entity_id:
+      name: Fan Entity
+      description: The fan entity to control.
       required: true
-      selector: { entity: { domain: fan } }
+      selector:
+        entity:
+          domain: fan
+          integration: openfan_micro
     volts:
+      name: Voltage
+      description: The voltage to set (5 or 12).
       required: true
       selector:
         select:
           options:
-            - "5"
-            - "12"
+            - label: "5V"
+              value: "5"
+            - label: "12V"
+              value: "12"
 
 calibrate_min:
-  name: Calibrate minimum PWM
-  description: Sweep PWM and detect minimum that reliably spins the fan; stores result in options as min_pwm and marks calibrated.
+  name: Calibrate Minimum PWM
+  description: Find the minimum PWM value that reliably spins the fan. Stores result in options.
   fields:
     entity_id:
+      name: Fan Entity
+      description: The fan entity to calibrate.
       required: true
-      selector: { entity: { domain: fan } }
+      selector:
+        entity:
+          domain: fan
+          integration: openfan_micro
     from_pct:
-      required: false
+      name: Start Percentage
+      description: Starting PWM percentage for calibration.
       default: 10
-      selector: { number: { min: 0, max: 50, step: 1, mode: box } }
+      selector:
+        number:
+          min: 1
+          max: 50
+          step: 1
+          mode: box
+          unit_of_measurement: "%"
     to_pct:
-      required: false
+      name: End Percentage
+      description: Maximum PWM percentage to test.
       default: 40
-      selector: { number: { min: 20, max: 60, step: 1, mode: box } }
+      selector:
+        number:
+          min: 20
+          max: 80
+          step: 1
+          mode: box
+          unit_of_measurement: "%"
     step:
-      required: false
+      name: Step Size
+      description: PWM increment between tests.
       default: 5
-      selector: { number: { min: 1, max: 20, step: 1, mode: box } }
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          mode: box
+          unit_of_measurement: "%"
     rpm_threshold:
-      required: false
+      name: RPM Threshold
+      description: Minimum RPM to consider the fan spinning.
       default: 100
-      selector: { number: { min: 0, max: 2000, step: 10, mode: box } }
+      selector:
+        number:
+          min: 50
+          max: 2000
+          step: 10
+          mode: box
+          unit_of_measurement: "rpm"
     margin:
-      required: false
+      name: Safety Margin
+      description: Additional PWM added to the found minimum.
       default: 5
-      selector: { number: { min: 0, max: 20, step: 1, mode: box } }
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          mode: box
+          unit_of_measurement: "%"
 
 set_temp_control:
-  name: Set temperature control
-  description: Configure temperature-based control (curve + smoothing) for this fan.
+  name: Set Temperature Control
+  description: Configure temperature-based fan control for a specific fan.
   fields:
     entity_id:
+      name: Fan Entity
+      description: The fan entity to configure.
       required: true
-      selector: { entity: { domain: fan } }
+      selector:
+        entity:
+          domain: fan
+          integration: openfan_micro
     temp_entity:
-      required: true
-      selector: { entity: { domain: sensor } }
+      name: Temperature Sensor
+      description: Temperature sensor entity to use for control.
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
     temp_curve:
-      required: true
+      name: Temperature Curve
+      description: "Piecewise-linear curve as 'temp=pwm' pairs (e.g., '45=25, 60=55, 75=100')."
       example: "45=35, 60=60, 70=100"
-      selector: { text: {} }
+      selector:
+        text:
     temp_integrate_seconds:
-      required: false
+      name: Integration Window
+      description: Seconds to average temperature readings over.
       default: 30
-      selector: { number: { min: 5, max: 900, step: 5, mode: box } }
+      selector:
+        number:
+          min: 5
+          max: 300
+          step: 5
+          mode: box
+          unit_of_measurement: "s"
     temp_update_min_interval:
-      required: false
+      name: Minimum Update Interval
+      description: Minimum seconds between PWM changes.
       default: 10
-      selector: { number: { min: 2, max: 300, step: 1, mode: box } }
+      selector:
+        number:
+          min: 2
+          max: 120
+          step: 1
+          mode: box
+          unit_of_measurement: "s"
     temp_deadband_pct:
-      required: false
+      name: Deadband
+      description: Minimum PWM change to trigger an update.
       default: 3
-      selector: { number: { min: 0, max: 20, step: 1, mode: box } }
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          mode: box
+          unit_of_measurement: "%"
 
 clear_temp_control:
-  name: Disable temperature control
-  description: Clear temp_entity to disable temperature-based control.
+  name: Clear Temperature Control
+  description: Disable temperature-based fan control for a specific fan.
   fields:
     entity_id:
+      name: Fan Entity
+      description: The fan entity to clear temperature control from.
       required: true
-      selector: { entity: { domain: fan } }
+      selector:
+        entity:
+          domain: fan
+          integration: openfan_micro
+
+apply_profile:
+  name: Apply Profile
+  description: "Apply a named temperature control profile to a fan. Built-in profiles: quiet, balanced, aggressive."
+  fields:
+    entity_id:
+      name: Fan Entity
+      description: The fan entity to apply the profile to.
+      required: true
+      selector:
+        entity:
+          domain: fan
+          integration: openfan_micro
+    profile:
+      name: Profile Name
+      description: "Name of the profile to apply (built-in: quiet, balanced, aggressive, or custom profile name)."
+      required: true
+      example: "balanced"
+      selector:
+        text:
+
+save_profile:
+  name: Save Profile
+  description: Save the current fan temperature control settings as a named custom profile.
+  fields:
+    entity_id:
+      name: Fan Entity
+      description: The fan entity whose settings to save.
+      required: true
+      selector:
+        entity:
+          domain: fan
+          integration: openfan_micro
+    profile:
+      name: Profile Name
+      description: Name for the new custom profile (cannot overwrite built-in profiles).
+      required: true
+      example: "my_custom_profile"
+      selector:
+        text:
+
+list_profiles:
+  name: List Profiles
+  description: List available temperature control profiles (returns builtin and custom profile names).
+  fields:
+    entity_id:
+      name: Fan Entity
+      description: Any fan entity to query profiles for.
+      required: true
+      selector:
+        entity:
+          domain: fan
+          integration: openfan_micro

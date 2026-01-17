@@ -1,35 +1,57 @@
 # OpenFAN Micro — Home Assistant Integration
 
-Note: AI used for generate code, at least I tested few days with 2 controller+fans.
+> **Status:** `v2.0.0`  
+> Major release with **multi-fan support**, **per-fan aliases**, **temperature profiles**, and **per-fan temperature control**.
 
-> **Status:**  `v1.0.0`
-> “Graduated from v0.3.1-beta.3; stability & docs polish.”
-> Custom integration for [OpenFAN Micro](https://github.com/SasaKaranovic/OpenFan-Micro) devices.  
-> Adds LED and 5V/12V switches, stall detection, diagnostics, and **temperature-based fan control** with smoothing and **calibration-gated minimum PWM**.
+Custom integration for [OpenFAN Micro](https://github.com/SasaKaranovic/OpenFan-Micro) and OpenFAN (full app) devices.  
+Adds LED and 5V/12V switches, stall detection, diagnostics, and **temperature-based fan control** with smoothing and **calibration-gated minimum PWM**.
+
+---
+
+## What's New in v2.0.0
+
+- **Multi-fan support**: Devices with multiple fans (up to 10) now create separate entities per fan
+- **Per-fan aliases**: Give each fan a friendly name (e.g., "CPU Fan", "GPU Fan")
+- **Temperature profiles**: Built-in profiles (quiet, balanced, aggressive) + custom profile support
+- **Per-fan temperature control**: Each fan can have its own temp sensor, curve, and settings
+- **Automatic migration**: Existing single-fan configurations are automatically migrated
+
+### Upgrading from v1.x
+
+Your existing configuration will be automatically migrated. Single-fan settings are preserved and moved to the per-fan structure. No action required!
+
+If you experience issues after upgrading:
+1. Check **Settings → Devices & Services → OpenFAN Micro → Options**
+2. Verify your temperature control settings are intact
+3. Download diagnostics and open an issue if problems persist
 
 ---
 
 ## Features
 
-- **Fan control**: on/off and percentage (0–100%)
+- **Fan control**: on/off and percentage (0–100%) per fan
+- **Multi-fan support**: Automatic detection and entity creation for multi-fan devices
+- **Per-fan aliases**: Custom names for each fan without breaking entity IDs
 - **RPM sensor** (`sensor.<name>_rpm`) with long-term statistics
 - **LED switch** (`switch.<name>_led`) — activity LED on/off
 - **12V mode switch** (`switch.<name>_12v_mode`) — on=12V, off=5V
 - **Availability gating** — marks device `unavailable` only after N consecutive failures
-- **Stall detection** — binary sensor + persistent notification + HA event
+- **Stall detection** — binary sensor + persistent notification + HA event (per fan)
 - **Diagnostics export** — from the integration card
 - **Temperature-based control** (piecewise-linear curve) with:
   - moving-average **integration window**
   - **minimum interval** between speed changes
   - **deadband** to avoid flapping
   - **clamped by calibrated minimum PWM** (never drives below min, except when fully off)
+- **Temperature profiles**: Built-in (quiet, balanced, aggressive) and custom profiles
 
 ---
 
 ## Requirements
 
-- OpenFAN Micro firmware providing:
-  - Fan status & set: `/api/v0/fan/status`, `/api/v0/fan/0/status`, `/api/v0/fan/0/set?value=…` (legacy `/api/v0/fan/set?value=…` also supported)
+- OpenFAN Micro or OpenFAN (full app) firmware providing:
+  - Fan status: `/api/v0/fan/status` (multi-fan) or `/api/v0/fan/0/status` (single-fan)
+  - Fan set: `/api/v0/fan/{index}/set?value=…` or `/api/v0/fan/{index}/pwm?value=…`
   - Device status: `/api/v0/openfan/status` (fields: `act_led_enabled`, `fan_is_12v`)
   - LED & voltage: `/api/v0/led/(enable|disable)`, `/api/v0/fan/voltage/(high|low)?confirm=true`
 - Home Assistant **2024.12 or newer** (tested on 2025.x)
@@ -43,54 +65,69 @@ Note: AI used for generate code, at least I tested few days with 2 controller+fa
 1. **HACS → Integrations →** ⋮ **Custom repositories**
 2. Add: `https://github.com/bitlisz1/hass-openfan-micro` (Category: **Integration**)
 3. Find **OpenFAN Micro** → **Download**
-4. (Optional) Click **“Need a different version?”** and select **`v0.3.1-beta.3`** (pre-release)
-5. **Restart Home Assistant**
-6. **Settings → Devices & Services → Add Integration → OpenFAN Micro**, then enter the device IP and a friendly name  
-   (repeat per device if you have multiple)
+4. **Restart Home Assistant**
+5. **Settings → Devices & Services → Add Integration → OpenFAN Micro**, enter the device IP and name
 
 ### Option B — Manual
 
-1. Copy this folder to your HA config:  
-   `custom_components/openfan_micro/`
+1. Copy `custom_components/openfan_micro/` to your HA config directory
 2. **Restart Home Assistant**
 3. Add the integration: **Settings → Devices & Services → Add Integration → OpenFAN Micro**
 
-> **Note:** If the **Options** button doesn’t show up on the integration card (frontend cache), all advanced settings can be configured via **Developer Tools → Actions** services (see below).
+---
+
+## Entities Created
+
+### Single-fan device (OpenFAN Micro)
+- `fan.<name>` — main fan entity
+- `sensor.<name>_rpm` — RPM sensor
+- `switch.<name>_led` — activity LED
+- `switch.<name>_12v_mode` — 12V mode
+- `binary_sensor.<name>_stall` — stall detection
+
+### Multi-fan device (OpenFAN Full App)
+For a device with N fans:
+- `fan.<name>` — Fan 1 (index 0, legacy-compatible)
+- `fan.<name>_fan_2` — Fan 2
+- `fan.<name>_fan_3` — Fan 3
+- ... and so on
+
+Each fan also gets its own RPM sensor and stall detector:
+- `sensor.<name>_rpm`, `sensor.<name>_fan_2_rpm`, etc.
+- `binary_sensor.<name>_stall`, `binary_sensor.<name>_fan_2_stall`, etc.
+
+### Fan Entity Attributes
+
+Each fan entity exposes:
+- `fan_index` — index of this fan (0-9)
+- `min_pwm`, `min_pwm_calibrated` — calibration state
+- `profile` — currently applied profile (if any)
+- `temp_control_active` — whether temp control is running
+- `temp_entity`, `temp_curve` — temperature control configuration
+- `temp_avg`, `last_target_pwm`, `last_applied_pwm` — runtime state
+- `temp_update_min_interval`, `temp_deadband_pct` — timing settings
 
 ---
 
-## Entities created (per device)
+## Configuration
 
-- `fan.<name>` — main fan entity (percentage + on/off)
-- `sensor.<name>_rpm` — RPM (unit: `rpm`, `state_class: measurement`)
-- `switch.<name>_led` — activity LED on/off
-- `switch.<name>_12v_mode` — 12V mode on/off (on=12V, off=5V)
-- `binary_sensor.<name>_stall` — **on** when stall is detected
+### Per-Fan Aliases
 
-### Extra attributes on the fan entity
+Give your fans friendly names via **Options**:
 
-The `fan.<name>` entity exposes:
+1. **Settings → Devices & Services → OpenFAN Micro → Options**
+2. Configure global settings, then click Submit
+3. Select a fan to configure
+4. Enter an **Alias** (e.g., "CPU Fan")
+5. Optionally configure another fan
 
-- `min_pwm`, `min_pwm_calibrated`
-- `temp_control_active`
-- `temp_entity`, `temp_curve`
-- `temp_avg` (moving-average), `last_target_pwm`, `last_applied_pwm`
-- `temp_update_min_interval`, `temp_deadband_pct`
+Aliases change the entity's friendly name but preserve the unique ID for automations.
 
-Use a **Markdown** Lovelace card to display these attributes if you like (examples below).
+### Calibrating Minimum PWM
 
----
+Run once per fan to find the minimum PWM that reliably spins the fan:
 
-## First run: Calibrate the minimum PWM (required for temp control)
-
-Run once per device to find the minimum PWM that reliably spins the fan.
-
-**Developer Tools → Actions →**
-
-`openfan_micro.calibrate_min`:
-
-yaml
-
+```yaml
 action: openfan_micro.calibrate_min
 data:
   entity_id: fan.your_fan_entity
@@ -99,167 +136,208 @@ data:
   step: 2
   rpm_threshold: 120
   margin: 5
-The routine increases PWM until RPM >= rpm_threshold, then stores min_pwm = found + margin
+```
 
-Sets min_pwm_calibrated = true
+**Tip:** Re-calibrate after switching 5V/12V mode.
 
-Tip: Re-calibrate after switching 5V/12V
+---
 
-Temperature-based control
-You can configure it through Options (if visible) or via Actions services (always available).
+## Temperature Control
 
-A) Configure via Options
+### Using Profiles (Recommended)
 
-Integrations → OpenFAN Micro → Options:
+Apply a built-in profile to quickly configure temperature control:
 
-temp_entity: temperature sensor entity (e.g. sensor.rt_ax92u_temperature_cpu)
-temp_curve: curve points in °C=PWM% pairs, comma-separated, e.g.
+```yaml
+action: openfan_micro.apply_profile
+data:
+  entity_id: fan.cpu_fan
+  profile: balanced
+```
 
-45=35, 60=60, 70=100
+**Built-in Profiles:**
 
-temp_integrate_seconds: moving-average window (e.g. 30–90)
-temp_update_min_interval: minimum seconds between changes (e.g. 10–30)
-temp_deadband_pct: change threshold in % to avoid tiny adjustments (e.g. 3–5)
+| Profile | Curve | Integration | Min Interval | Deadband |
+|---------|-------|-------------|--------------|----------|
+| `quiet` | 45=25, 60=55, 75=100 | 60s | 15s | 5% |
+| `balanced` | 45=35, 60=60, 70=100 | 30s | 10s | 3% |
+| `aggressive` | 45=40, 55=70, 65=100 | 15s | 5s | 2% |
 
-The controller activates only if the entry is calibrated and has a valid temp_entity and curve.
+### Custom Configuration
 
-B) Configure via Actions (services)
-Enable / update:
+Configure via Options or services:
 
-yaml
-
+```yaml
 action: openfan_micro.set_temp_control
 data:
-  entity_id: fan.your_fan_entity
-  temp_entity: sensor.any_temperature
+  entity_id: fan.cpu_fan
+  temp_entity: sensor.cpu_temperature
   temp_curve: "45=35, 60=60, 70=100"
   temp_integrate_seconds: 30
   temp_update_min_interval: 10
   temp_deadband_pct: 3
-Disable:
+```
 
-yaml
+### Saving Custom Profiles
 
+Save your current settings as a reusable profile:
+
+```yaml
+action: openfan_micro.save_profile
+data:
+  entity_id: fan.cpu_fan
+  profile: my_silent_profile
+```
+
+### Disabling Temperature Control
+
+```yaml
 action: openfan_micro.clear_temp_control
 data:
-  entity_id: fan.your_fan_entity
+  entity_id: fan.cpu_fan
+```
 
-Recommended curves (45–75 °C)
-Quiet: 45=25, 60=55, 75=100
+---
 
-Balanced (default): 45=35, 60=60, 70=100
+## All Services
 
-Aggressive: 45=40, 55=70, 65=100
+| Service | Description |
+|---------|-------------|
+| `openfan_micro.led_set` | Enable/disable activity LED |
+| `openfan_micro.set_voltage` | Switch 5V/12V supply |
+| `openfan_micro.calibrate_min` | Find minimum PWM for reliable spin |
+| `openfan_micro.set_temp_control` | Configure temperature-based control |
+| `openfan_micro.clear_temp_control` | Disable temperature control |
+| `openfan_micro.apply_profile` | Apply a named profile |
+| `openfan_micro.save_profile` | Save current settings as custom profile |
+| `openfan_micro.list_profiles` | List available profiles |
 
-The controller never drives below min_pwm (except when target is 0%, which turns the fan off).
+---
 
-LED & Voltage services (optional)
+## Lovelace Examples
 
-yaml
+### Single Fan Card
 
-# LED on/off
-action: openfan_micro.led_set
-data:
-  entity_id: fan.your_fan_entity
-  enabled: true
+```yaml
+type: vertical-stack
+cards:
+  - type: entities
+    title: CPU Fan
+    entities:
+      - entity: fan.cpu_fan
+        name: Fan
+      - entity: sensor.cpu_fan_rpm
+        name: RPM
+      - entity: switch.cpu_fan_led
+        name: LED
+      - entity: switch.cpu_fan_12v_mode
+        name: 12V Mode
+  - type: markdown
+    content: |
+      **Control State**
+      - Profile: **{{ state_attr('fan.cpu_fan','profile') or 'Custom' }}**
+      - Calibrated min: **{{ state_attr('fan.cpu_fan','min_pwm') }}%**
+      - Temp control: **{{ state_attr('fan.cpu_fan','temp_control_active') }}**
+      - Temp average: **{{ (state_attr('fan.cpu_fan','temp_avg') or 0) | round(1) }}°C**
+      - Target PWM: **{{ state_attr('fan.cpu_fan','last_target_pwm') }}%**
+```
 
-# 12V / 5V (UI offers "5"/"12" strings; service accepts numbers too)
-action: openfan_micro.set_voltage
-data:
-  entity_id: fan.your_fan_entity
-  volts: "12"   # or "5"
-Stall detection
-The binary sensor turns on if PWM > min_pwm and RPM == 0 for N consecutive polls
-(stall_consecutive option; default 3). When detected, the integration also emits:
+### Multi-Fan Dashboard
 
-Event: openfan_micro_stall (payload includes host)
+```yaml
+type: vertical-stack
+cards:
+  - type: entities
+    title: OpenFAN Controller
+    entities:
+      - entity: fan.openfan
+        name: CPU Fan
+      - entity: fan.openfan_fan_2
+        name: GPU Fan
+      - entity: fan.openfan_fan_3
+        name: Case Fan
+  - type: horizontal-stack
+    cards:
+      - type: gauge
+        entity: sensor.openfan_rpm
+        name: CPU
+        min: 0
+        max: 2500
+      - type: gauge
+        entity: sensor.openfan_fan_2_rpm
+        name: GPU
+        min: 0
+        max: 2500
+      - type: gauge
+        entity: sensor.openfan_fan_3_rpm
+        name: Case
+        min: 0
+        max: 2500
+```
 
-Persistent notification in HA
+---
 
-Diagnostics
-Settings → Devices & Services → Integrations → OpenFAN Micro → ⋮ Download diagnostics
-The bundle includes:
+## Stall Detection
 
-Config entry options
+The binary sensor turns **on** if PWM > min_pwm and RPM == 0 for N consecutive polls (`stall_consecutive` option, default 3).
 
-Last coordinator data (rpm, pwm, LED, 12V, stall)
+When detected:
+- Event `openfan_micro_stall` is fired (payload includes `host` and `fan_index`)
+- Persistent notification is created in HA
 
-Controller state (temp average, last target/applied PWM, gating flags)
+---
 
-If you open an issue, attaching diagnostics and a debug log helps a lot.
+## Diagnostics
 
-Troubleshooting
-Options button missing: Use the Actions services; refresh the browser (Ctrl+F5) or restart HA to reveal Options later.
+**Settings → Devices & Services → Integrations → OpenFAN Micro → ⋮ → Download diagnostics**
 
-Fan sticks near minimum: Confirm min_pwm_calibrated: true. Check temp_avg, last_target_pwm, last_applied_pwm. Consider reducing temp_deadband_pct, lowering temp_update_min_interval, or raising curve points.
+Includes:
+- Config entry options (global and per-fan)
+- Coordinator data (rpm, pwm, LED, 12V, stall per fan)
+- Per-fan controller states (profile, temp average, target/applied PWM)
+- Available profiles (built-in and custom)
 
-LED/12V toggles jump back: Ensure your firmware provides /api/v0/openfan/status; this integration reads act_led_enabled / fan_is_12v from there.
+---
 
-“No long-term statistics” warning: The RPM sensor sets state_class: measurement. If you saw earlier warnings, you can safely delete the old statistics record when prompted.
+## Troubleshooting
 
-Multiple devices: All services accept entity_id to target the correct device; options are stored on the owner config entry.
+**Options button missing:** Use the Actions services; refresh browser (Ctrl+F5) or restart HA.
 
-Enable debug logging
-yaml
+**Fan sticks near minimum:** Check `min_pwm_calibrated: true`. Verify `temp_avg`, `last_target_pwm`. Try reducing `temp_deadband_pct`.
 
+**LED/12V toggles jump back:** Ensure firmware provides `/api/v0/openfan/status`.
+
+**Multi-fan entities not created:** Check that your device reports fan count via `/api/v0/fan/status`. Single-fan fallback is used if detection fails.
+
+**Migration issues:** Download diagnostics and check that `options.fans` structure exists.
+
+### Enable Debug Logging
+
+```yaml
 logger:
   default: info
   logs:
     custom_components.openfan_micro: debug
+```
 
-Lovelace examples
-Entities + attributes (Markdown)
+---
 
-yaml
+## Contributing
 
-type: vertical-stack
-cards:
-  - type: entities
-    title: UOpenFan Up
-    entities:
-      - entity: fan.uopenfanup
-        name: Fan
-      - entity: sensor.uopenfanup_rpm
-        name: RPM
-      - entity: switch.uopenfan_up_led
-        name: LED
-      - entity: switch.uopenfan_up_12v_mode
-        name: 12V Mode
-  - type: markdown
-    content: |
-      **Control state**
-      - Calibrated min: **{{ state_attr('fan.uopenfanup','min_pwm') }}%** (calibrated: {{ state_attr('fan.uopenfanup','min_pwm_calibrated') }})
-      - Temp control active: **{{ state_attr('fan.uopenfanup','temp_control_active') }}**
-      - Temp entity: `{{ state_attr('fan.uopenfanup','temp_entity') }}`
-      - Temp average: **{{ (state_attr('fan.uopenfanup','temp_avg') or 0) | round(1) }}°C**
-      - Target PWM: **{{ state_attr('fan.uopenfanup','last_target_pwm') }}%**
-      - Applied PWM: **{{ state_attr('fan.uopenfanup','last_applied_pwm') }}%**
-
-Gauge (RPM)
-yaml
-
-type: gauge
-entity: sensor.uopenfanup_rpm
-min: 0
-max: 2500
-name: UOpenFan Up RPM
-(Repeat the stack for the “Down” fan with the corresponding entity ids.)
-
-
-Contributing
 Issues and PRs are welcome. When reporting bugs, please attach:
+- Diagnostics export
+- Debug logs
 
-Diagnostics export (see above)
+---
 
-Debug logs
+## Credits
 
-Credits
+- OpenFAN Micro hardware & firmware: [Sasa Karanovic](https://github.com/SasaKaranovic/OpenFan-Micro)
+- Original HA integration: BeryJu
+- This fork: Multi-fan support, profiles, aliases, per-fan temp control, and more
 
-OpenFAN Micro hardware & firmware: Sasa Karanovic
+---
 
-Original HA integration: BeryJu
+## License
 
-This fork: enhancements for LED/12V, stall detection, diagnostics, and temperature-based control with smoothing
-
-License
 See LICENSE in this repository. The integration may include code adapted from the original project; original licenses apply.
