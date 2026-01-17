@@ -6,14 +6,14 @@ Features:
 - Status payload normalization (top-level vs "data" container)
 - LED control and 5V/12V supply switching per documented endpoints
 """
+
 from __future__ import annotations
 
 from typing import Any, Tuple, Optional
 import logging
-import json
+import asyncio
 
 import aiohttp
-import async_timeout
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +27,8 @@ class OpenFanApi:
         self._min_pwm: int = 0
         self._failure_threshold: int = 3
         self._stall_consecutive: int = 3
+        self._fan_count: int = 1
+        self._last_pwm_by_index: dict[int, int] = {}
 
     # -------------------- HTTP helpers --------------------
 
@@ -36,7 +38,7 @@ class OpenFanApi:
         We *do not* fail if body is not JSON (some firmwares reply plain 'OK').
         """
         url = f"http://{self._host}{path}"
-        async with async_timeout.timeout(6):
+        async with asyncio.timeout(6):
             async with self._session.get(url) as resp:
                 status = resp.status
                 text = await resp.text()
@@ -93,40 +95,119 @@ class OpenFanApi:
 
         return max(0, rpm), max(0, min(100, pwm))
 
+    def _parse_multi_fan_payload(self, data: dict) -> dict[int, int]:
+        """Normalize a multi-fan RPM payload into {index: rpm}."""
+        container: dict[str, Any] = data or {}
+        if "data" in container and isinstance(container.get("data"), dict):
+            container = container.get("data", {}) or {}
+
+        rpm_by_index: dict[int, int] = {}
+        for raw_index, raw_value in container.items():
+            try:
+                idx = int(raw_index)
+            except Exception:
+                continue
+            try:
+                rpm = int(float(raw_value))
+            except Exception:
+                rpm = 0
+            if 0 <= idx <= 9:
+                rpm_by_index[idx] = max(0, rpm)
+        return rpm_by_index
+
     async def get_status(self) -> Tuple[int, int]:
-        """Return (rpm, pwm_percent). Tries both new and legacy endpoints."""
+        """Return (rpm, pwm_percent) for legacy single-fan firmware."""
+        rpm_by_index = await self.get_status_all()
+        rpm = rpm_by_index.get(0, 0)
+        pwm = int(self._last_pwm_by_index.get(0, 0))
+        return rpm, pwm
+
+    async def get_status_all(self) -> dict[int, int]:
+        """Return {index: rpm} for all fans; supports single-fan fallback."""
         last_exc: Optional[Exception] = None
         for path in ("/api/v0/fan/status", "/api/v0/fan/0/status"):
             try:
                 data = await self._get_json(path)
-                # Some firmwares wrap in {"status":"ok","data":{...}}
-                if isinstance(data, dict) and "data" in data and isinstance(data["data"], dict):
-                    data = data["data"]
-                return self._parse_status_payload(data)
+                if path.endswith("/fan/0/status"):
+                    rpm, pwm = self._parse_status_payload(data)
+                    self._fan_count = max(self._fan_count, 1)
+                    self._last_pwm_by_index[0] = int(pwm)
+                    return {0: rpm}
+                rpm_by_index = self._parse_multi_fan_payload(data)
+                if rpm_by_index:
+                    self._fan_count = max(self._fan_count, max(rpm_by_index.keys(), default=0) + 1)
+                    return rpm_by_index
+                rpm, pwm = self._parse_status_payload(data)
+                self._fan_count = max(self._fan_count, 1)
+                self._last_pwm_by_index[0] = int(pwm)
+                return {0: rpm}
             except Exception as exc:
                 last_exc = exc
-                _LOGGER.debug("OpenFAN %s: get_status via %s failed: %r", self._host, path, exc)
+                _LOGGER.debug("OpenFAN %s: get_status_all via %s failed: %r", self._host, path, exc)
+
         assert last_exc is not None
         raise last_exc
 
+    async def get_status_index(self, index: int) -> Tuple[int, int]:
+        """Return (rpm, pwm_percent) for a specific fan index."""
+        rpm_by_index = await self.get_status_all()
+        rpm = rpm_by_index.get(int(index), 0)
+        pwm = int(self._last_pwm_by_index.get(int(index), 0))
+        return rpm, pwm
+
     async def set_pwm(self, value: int) -> dict[str, Any]:
-        """Set PWM 0..100; supports both new and legacy endpoints.
+        """Set PWM 0..100 on fan index 0 (legacy)."""
+        return await self.set_pwm_index(0, value)
+
+    async def set_pwm_index(self, index: int, value: int) -> dict[str, Any]:
+        """Set PWM 0..100 for a specific fan index.
 
         Treats non-JSON 'OK' responses as success.
         """
         value = max(0, min(100, int(value)))
+        idx = int(index)
         last_exc: Optional[Exception] = None
-        for path in (f"/api/v0/fan/0/set?value={value}", f"/api/v0/fan/set?value={value}"):
+        for path in (
+            f"/api/v0/fan/{idx}/pwm?value={value}",
+            f"/api/v0/fan/{idx}/set?value={value}",
+            f"/api/v0/fan/set?value={value}",
+        ):
             try:
                 status, text, data = await self._get_any(path)
                 if status < 400 and self._is_ok_payload(data, text):
+                    self._last_pwm_by_index[idx] = value
+                    self._fan_count = max(self._fan_count, idx + 1)
                     return data or {"status": "ok"}
                 raise RuntimeError(f"Bad response on {path}: {status} {text!r}")
             except Exception as exc:
                 last_exc = exc
-                _LOGGER.debug("OpenFAN %s: set_pwm via %s failed: %r", self._host, path, exc)
+                _LOGGER.debug("OpenFAN %s: set_pwm_index via %s failed: %r", self._host, path, exc)
         assert last_exc is not None
         raise last_exc
+
+    async def set_pwm_all(self, value: int) -> dict[str, Any]:
+        """Set PWM 0..100 for all fans (full app)."""
+        value = max(0, min(100, int(value)))
+        status, text, data = await self._get_any(f"/api/v0/fan/all/set?value={value}")
+        if status >= 400:
+            raise RuntimeError(f"Bad response on /api/v0/fan/all/set: {status} {text!r}")
+        if self._is_ok_payload(data, text):
+            for idx in range(max(1, int(self._fan_count))):
+                self._last_pwm_by_index[idx] = value
+            return data or {"status": "ok"}
+        raise RuntimeError(f"Bad response on /api/v0/fan/all/set: {status} {text!r}")
+
+    async def set_rpm_index(self, index: int, value: int) -> dict[str, Any]:
+        """Set target RPM for a specific fan index (full app)."""
+        idx = int(index)
+        val = int(value)
+        status, text, data = await self._get_any(f"/api/v0/fan/{idx}/rpm?value={val}")
+        if status >= 400:
+            raise RuntimeError(f"Bad response on /api/v0/fan/{idx}/rpm: {status} {text!r}")
+        if self._is_ok_payload(data, text):
+            self._fan_count = max(self._fan_count, idx + 1)
+            return data or {"status": "ok"}
+        raise RuntimeError(f"Bad response on /api/v0/fan/{idx}/rpm: {status} {text!r}")
 
     # -------------------- LED & SUPPLY VOLTAGE --------------------
 
@@ -153,7 +234,11 @@ class OpenFanApi:
 
     async def set_voltage_12v(self, enabled: bool) -> dict:
         """Switch fan supply to 12V (True) or 5V (False). Requires confirm=true."""
-        path = "/api/v0/fan/voltage/high?confirm=true" if enabled else "/api/v0/fan/voltage/low?confirm=true"
+        path = (
+            "/api/v0/fan/voltage/high?confirm=true"
+            if enabled
+            else "/api/v0/fan/voltage/low?confirm=true"
+        )
         status, text, data = await self._get_any(path)
         if status >= 400:
             raise RuntimeError(f"Voltage set failed: {status} {text}")

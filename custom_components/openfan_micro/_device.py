@@ -6,6 +6,7 @@ Exposes:
 - `device_info()`: HA device registry metadata
 - optional MAC handling (if device/API does not provide one)
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -32,24 +33,31 @@ class OpenFanDevice:
         *,
         mac: Optional[str] = None,
         session=None,
+        fan_count: Optional[int] = None,
     ) -> None:
         self.hass = hass
         self.host = host
         self.name = name or f"OpenFAN Micro {host}"
+        self.fan_count = max(1, int(fan_count or 1))
 
         # Use HA's shared aiohttp session
         if session is None:
             from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
             session = async_get_clientsession(hass)
 
         self.api = OpenFanApi(host, session)
+        if self.fan_count:
+            self.api._fan_count = int(self.fan_count)
         self.coordinator: DataUpdateCoordinator = OpenFanCoordinator(hass, self.api)
+        self.temp_controllers: dict = {}  # Populated by __init__.py
 
+        model = "OpenFAN" if int(self.fan_count or 1) > 1 else "OpenFAN Micro"
         self._fixed_data: dict[str, Any] = {
             "host": host,
             "name": self.name,
             "mac": mac,
-            "model": "OpenFAN Micro",
+            "model": model,
             "manufacturer": "Karanovic Research",
         }
 
@@ -85,6 +93,7 @@ class OpenFanDevice:
         if m:
             try:
                 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC
+
                 info["connections"] = {(CONNECTION_NETWORK_MAC, m)}
             except Exception:
                 pass
@@ -96,6 +105,7 @@ class OpenFanDevice:
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<OpenFanDevice host={self.host} name={self.name!r} mac={self.mac!r}>"
+
 
 # Backwards-compatible alias (original code imported `Device`)
 Device = OpenFanDevice

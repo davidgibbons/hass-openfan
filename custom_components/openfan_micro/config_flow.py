@@ -3,6 +3,7 @@
 Minimal UI flow: just ask for Host and optional Name.
 We probe the device once to validate connectivity.
 """
+
 from __future__ import annotations
 
 import voluptuous as vol
@@ -29,14 +30,32 @@ async def _validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str
     dev = OpenFanDevice(hass, host, name)
     # First refresh will fetch status once (raises on network error).
     await dev.async_first_refresh()
-    rpm = dev.coordinator_data.get("rpm", 0)
+    rpm = 0
+    data = dev.coordinator_data or {}
+    fans = data.get("fans") if isinstance(data, dict) else None
+    if isinstance(fans, dict):
+        try:
+            rpm = int((fans.get(0) or {}).get("rpm") or 0)
+        except Exception:
+            rpm = 0
+    else:
+        try:
+            rpm = int(data.get("rpm") or 0)
+        except Exception:
+            rpm = 0
+    fan_count = 1
+    try:
+        fan_count = max(1, int(getattr(dev.api, "_fan_count", 1) or 1))
+    except Exception:
+        fan_count = 1
 
-    return {"title": name, "host": host, "name": name, "rpm": rpm}
+    return {"title": name, "host": host, "name": name, "rpm": rpm, "fan_count": fan_count}
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OpenFAN Micro."""
-    VERSION = 1
+
+    VERSION = 2  # Bumped for multi-fan options migration
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         if user_input is None:
@@ -56,5 +75,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_create_entry(
             title=info["title"],
-            data={"host": info["host"], "name": info["name"]},
+            data={
+                "host": info["host"],
+                "name": info["name"],
+                "fan_count": info.get("fan_count", 1),
+            },
         )
