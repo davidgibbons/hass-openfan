@@ -2,6 +2,7 @@
   "domain": "openfan_micro",
   "name": "OpenFAN Micro",
   "version": "2.0.0",
+  "config_flow": true,
   "documentation": "https://github.com/bitlisz1/hass-openfan-micro",
   "issue_tracker": "https://github.com/bitlisz1/hass-openfan-micro/issues",
   "codeowners": ["@bitlisz1"],
