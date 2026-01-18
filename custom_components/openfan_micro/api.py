@@ -19,8 +19,9 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class OpenFanApi:
-    def __init__(self, host: str, session: aiohttp.ClientSession) -> None:
-        self._host = host
+    def __init__(self, base_url: str, session: aiohttp.ClientSession) -> None:
+        # Normalize: remove trailing slash
+        self._base_url = base_url.rstrip("/")
         self._session = session
         # Tunables populated from options in __init__.py
         self._poll_interval: int = 5
@@ -37,7 +38,7 @@ class OpenFanApi:
 
         We *do not* fail if body is not JSON (some firmwares reply plain 'OK').
         """
-        url = f"http://{self._host}{path}"
+        url = f"{self._base_url}{path}"
         async with asyncio.timeout(6):
             async with self._session.get(url) as resp:
                 status = resp.status
@@ -48,17 +49,17 @@ class OpenFanApi:
                 except Exception:
                     # not JSON (acceptable for 'set' endpoints)
                     pass
-        _LOGGER.debug("OpenFAN %s GET %s -> %s %s", self._host, path, status, data or text)
+        _LOGGER.debug("OpenFAN %s GET %s -> %s %s", self._base_url, path, status, data or text)
         return status, text, data
 
     async def _get_json(self, path: str) -> dict:
         """HTTP GET that *requires* JSON. Raises on HTTP error or non-JSON."""
         status, text, data = await self._get_any(path)
         if status >= 400:
-            _LOGGER.error("OpenFAN %s HTTP %s on %s: %s", self._host, status, path, text)
+            _LOGGER.error("OpenFAN %s HTTP %s on %s: %s", self._base_url, status, path, text)
             raise RuntimeError(f"HTTP {status} for {path}")
         if not isinstance(data, dict):
-            _LOGGER.error("OpenFAN %s expected JSON on %s but got: %s", self._host, path, text)
+            _LOGGER.error("OpenFAN %s expected JSON on %s but got: %s", self._base_url, path, text)
             raise RuntimeError(f"Non-JSON response for {path}")
         return data
 
@@ -143,7 +144,9 @@ class OpenFanApi:
                 return {0: rpm}
             except Exception as exc:
                 last_exc = exc
-                _LOGGER.debug("OpenFAN %s: get_status_all via %s failed: %r", self._host, path, exc)
+                _LOGGER.debug(
+                    "OpenFAN %s: get_status_all via %s failed: %r", self._base_url, path, exc
+                )
 
         assert last_exc is not None
         raise last_exc
@@ -181,7 +184,9 @@ class OpenFanApi:
                 raise RuntimeError(f"Bad response on {path}: {status} {text!r}")
             except Exception as exc:
                 last_exc = exc
-                _LOGGER.debug("OpenFAN %s: set_pwm_index via %s failed: %r", self._host, path, exc)
+                _LOGGER.debug(
+                    "OpenFAN %s: set_pwm_index via %s failed: %r", self._base_url, path, exc
+                )
         assert last_exc is not None
         raise last_exc
 
@@ -229,7 +234,7 @@ class OpenFanApi:
         if status >= 400:
             raise RuntimeError(f"LED set failed: {status} {text}")
         if not self._is_ok_payload(data, text):
-            _LOGGER.debug("OpenFAN %s: LED set non-OK body: %s", self._host, data or text)
+            _LOGGER.debug("OpenFAN %s: LED set non-OK body: %s", self._base_url, data or text)
         return data or {"status": "ok"}
 
     async def set_voltage_12v(self, enabled: bool) -> dict:
@@ -243,5 +248,5 @@ class OpenFanApi:
         if status >= 400:
             raise RuntimeError(f"Voltage set failed: {status} {text}")
         if not self._is_ok_payload(data, text):
-            _LOGGER.debug("OpenFAN %s: voltage set non-OK body: %s", self._host, data or text)
+            _LOGGER.debug("OpenFAN %s: voltage set non-OK body: %s", self._base_url, data or text)
         return data or {"status": "ok"}

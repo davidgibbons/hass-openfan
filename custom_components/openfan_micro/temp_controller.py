@@ -95,13 +95,13 @@ class FanTempController:
         self,
         hass: HomeAssistant,
         fan_index: int,
-        host: str,
+        url: str,
         set_pwm_callback: Callable[[int, int], Any],
         get_options_callback: Callable[[], dict[str, Any]],
     ) -> None:
         self.hass = hass
         self.fan_index = fan_index
-        self.host = host
+        self.url = url
         self._set_pwm = set_pwm_callback
         self._get_options = get_options_callback
         self._temp_buf: deque[tuple[float, float]] = deque(maxlen=512)
@@ -190,7 +190,7 @@ class FanTempController:
             self.state.active = False
             _LOGGER.debug(
                 "OpenFAN %s fan[%d] temp-control gated (cal=%s, temp_entity=%s, pts=%d, trig=%s)",
-                self.host,
+                self.url,
                 self.fan_index,
                 min_cal_ok,
                 bool(te),
@@ -217,7 +217,7 @@ class FanTempController:
         if temp is None:
             _LOGGER.debug(
                 "OpenFAN %s fan[%d] temp-control: no temp sample yet (trigger=%s)",
-                self.host,
+                self.url,
                 self.fan_index,
                 trigger,
             )
@@ -269,7 +269,7 @@ class FanTempController:
 
         _LOGGER.debug(
             "OpenFAN %s fan[%d] temp-control APPLY: temp=%.1f°C target=%d%% (min=%d%%, profile=%s, trig=%s)",
-            self.host,
+            self.url,
             self.fan_index,
             temp,
             target,

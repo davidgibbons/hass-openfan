@@ -28,7 +28,7 @@ class OpenFanDevice:
     def __init__(
         self,
         hass: HomeAssistant,
-        host: str,
+        url: str,
         name: Optional[str] = None,
         *,
         mac: Optional[str] = None,
@@ -36,17 +36,16 @@ class OpenFanDevice:
         fan_count: Optional[int] = None,
     ) -> None:
         self.hass = hass
-        self.host = host
-        self.name = name or f"OpenFAN Micro {host}"
+        self.url = url
+        self.name = name or f"OpenFAN Micro {url}"
         self.fan_count = max(1, int(fan_count or 1))
 
-        # Use HA's shared aiohttp session
         if session is None:
             from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
             session = async_get_clientsession(hass)
 
-        self.api = OpenFanApi(host, session)
+        self.api = OpenFanApi(url, session)
         if self.fan_count:
             self.api._fan_count = int(self.fan_count)
         self.coordinator: DataUpdateCoordinator = OpenFanCoordinator(hass, self.api)
@@ -54,7 +53,7 @@ class OpenFanDevice:
 
         model = "OpenFAN" if int(self.fan_count or 1) > 1 else "OpenFAN Micro"
         self._fixed_data: dict[str, Any] = {
-            "host": host,
+            "url": url,
             "name": self.name,
             "mac": mac,
             "model": model,
@@ -84,7 +83,7 @@ class OpenFanDevice:
     def device_info(self) -> dict[str, Any]:
         """Return HA device registry information."""
         info: dict[str, Any] = {
-            "identifiers": {(DOMAIN, self.host)},
+            "identifiers": {(DOMAIN, self.url)},
             "manufacturer": self._fixed_data.get("manufacturer", "Karanovic Research"),
             "model": self._fixed_data.get("model", "OpenFAN Micro"),
             "name": self._fixed_data.get("name", self.name),
@@ -104,7 +103,7 @@ class OpenFanDevice:
         return dict(self.coordinator.data or {})
 
     def __repr__(self) -> str:  # pragma: no cover
-        return f"<OpenFanDevice host={self.host} name={self.name!r} mac={self.mac!r}>"
+        return f"<OpenFanDevice url={self.url} name={self.name!r} mac={self.mac!r}>"
 
 
 # Backwards-compatible alias (original code imported `Device`)

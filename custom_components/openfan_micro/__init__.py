@@ -40,15 +40,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Create device runtime, forward platforms, wire temperature controllers & services."""
     global _SERVICES_REGISTERED
 
-    host = entry.data.get("host")
+    url = entry.data.get("url")
     name = entry.data.get("name")
     mac = entry.data.get("mac")
-    if not host:
-        _LOGGER.error("%s: missing 'host' in config entry", DOMAIN)
+    if not url:
+        _LOGGER.error("%s: missing 'url' in config entry", DOMAIN)
         return False
 
     fan_count = int(entry.data.get("fan_count", 1) or 1)
-    dev = Device(hass, host, name, mac=mac, fan_count=fan_count)
+    dev = Device(hass, url, name, mac=mac, fan_count=fan_count)
 
     # Apply options to API/coordinator tunables
     opts = entry.options or {}
@@ -79,7 +79,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         controller = FanTempController(
             hass=hass,
             fan_index=idx,
-            host=host,
+            url=url,
             set_pwm_callback=set_pwm_and_refresh,
             get_options_callback=get_options,
         )
@@ -395,21 +395,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate config entry to new version.
-
-    Version 1 -> 2: Migrate single-fan options to per-fan structure.
-    - min_pwm, min_pwm_calibrated, temp_entity, temp_curve moved to fans["0"]
-    - Preserves backward compatibility for existing single-fan users
-    """
+    """Migrate config entry to new version."""
     _LOGGER.debug("Migrating OpenFAN Micro entry from version %s", entry.version)
 
     if entry.version == 1:
-        # Version 1 -> 2: Migrate to per-fan options structure
         new_options = dict(entry.options or {})
 
-        # Only migrate if "fans" structure doesn't exist yet
         if "fans" not in new_options:
-            # Keys that should be per-fan for index 0
             per_fan_keys = [
                 "min_pwm",
                 "min_pwm_calibrated",
@@ -424,7 +416,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             for key in per_fan_keys:
                 if key in new_options:
                     fan_0_opts[key] = new_options[key]
-                    # Keep global defaults but fan-specific values move to fans["0"]
 
             if fan_0_opts:
                 new_options["fans"] = {"0": fan_0_opts}
@@ -434,13 +425,32 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     list(fan_0_opts.keys()),
                 )
 
-        # Update entry to version 2
         hass.config_entries.async_update_entry(
             entry,
             options=new_options,
             version=2,
         )
         _LOGGER.info("Migration to version 2 successful for %s", entry.title)
+
+    if entry.version == 2:
+        new_data = dict(entry.data or {})
+
+        if "host" in new_data and "url" not in new_data:
+            host = new_data.pop("host")
+            new_data["url"] = f"http://{host}"
+            _LOGGER.info(
+                "Migrated host '%s' to url '%s' for %s",
+                host,
+                new_data["url"],
+                entry.title,
+            )
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=3,
+        )
+        _LOGGER.info("Migration to version 3 successful for %s", entry.title)
 
     return True
 

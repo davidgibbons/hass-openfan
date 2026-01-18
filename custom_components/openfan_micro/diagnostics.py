@@ -29,7 +29,7 @@ async def async_get_config_entry_diagnostics(
 
     return {
         "title": entry.title,
-        "host": entry.data.get("host"),
+        "url": entry.data.get("url"),
         "fan_count": entry.data.get("fan_count", 1),
         "options": entry.options,
         "coordinator_data": coordinator_data,

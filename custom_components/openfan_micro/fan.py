@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from typing import Any
+from urllib.parse import urlparse
 import logging
 
 from homeassistant.components.fan import FanEntity, FanEntityFeature
@@ -35,7 +36,8 @@ class OpenFan(CoordinatorEntity, FanEntity):
         self._device = device
         self._entry = entry
         self._index = int(index)
-        self._host = getattr(device, "host", "unknown")
+        url = getattr(device, "url", "")
+        self._host_id = urlparse(url).netloc or url or "unknown"
         base_name = getattr(device, "name", "OpenFAN Micro")
         # Use alias from options if present, otherwise default naming
         fans_opts = (entry.options or {}).get("fans") or {}
@@ -48,9 +50,9 @@ class OpenFan(CoordinatorEntity, FanEntity):
                 base_name if self._index == 0 else f"{base_name} Fan {self._index + 1}"
             )
         if self._index == 0:
-            self._attr_unique_id = f"openfan_micro_{self._host}"
+            self._attr_unique_id = f"openfan_micro_{self._host_id}"
         else:
-            self._attr_unique_id = f"openfan_micro_{self._host}_{self._index}"
+            self._attr_unique_id = f"openfan_micro_{self._host_id}_{self._index}"
         self._attr_device_info = self._device.device_info()
         self._attr_entity_registry_visible_default = True
         self._attr_should_poll = False

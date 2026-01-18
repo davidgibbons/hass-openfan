@@ -1,6 +1,8 @@
 """LED and 12V switches for OpenFAN Micro."""
+
 from __future__ import annotations
 from typing import Any
+from urllib.parse import urlparse
 import logging
 
 from homeassistant.components.switch import SwitchEntity
@@ -12,7 +14,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     device = getattr(entry, "runtime_data", None)
     if device is None:
         _LOGGER.error("OpenFAN Micro: runtime_data is None (switch)")
@@ -24,7 +28,8 @@ class _BaseSwitch(CoordinatorEntity, SwitchEntity):
     def __init__(self, device) -> None:
         super().__init__(device.coordinator)
         self._device = device
-        self._host = getattr(device, "host", "unknown")
+        url = getattr(device, "url", "")
+        self._host_id = urlparse(url).netloc or url or "unknown"
 
     @property
     def device_info(self) -> dict[str, Any] | None:
@@ -42,12 +47,13 @@ class _BaseSwitch(CoordinatorEntity, SwitchEntity):
 
 class OpenFanLedSwitch(_BaseSwitch):
     """Activity LED on/off."""
+
     _attr_icon = "mdi:led-on"
 
     def __init__(self, device) -> None:
         super().__init__(device)
         self._attr_name = f"{getattr(device, 'name', 'OpenFAN Micro')} LED"
-        self._attr_unique_id = f"openfan_micro_led_{self._host}"
+        self._attr_unique_id = f"openfan_micro_led_{self._host_id}"
 
     @property
     def is_on(self) -> bool | None:
@@ -65,12 +71,13 @@ class OpenFanLedSwitch(_BaseSwitch):
 
 class OpenFanVoltageSwitch(_BaseSwitch):
     """12V mode on/off (on=12V, off=5V)."""
+
     _attr_icon = "mdi:flash"
 
     def __init__(self, device) -> None:
         super().__init__(device)
         self._attr_name = f"{getattr(device, 'name', 'OpenFAN Micro')} 12V Mode"
-        self._attr_unique_id = f"openfan_micro_12v_{self._host}"
+        self._attr_unique_id = f"openfan_micro_12v_{self._host_id}"
 
     @property
     def is_on(self) -> bool | None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from typing import Any
+from urllib.parse import urlparse
 import logging
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -35,9 +36,9 @@ class OpenFanRpmSensor(CoordinatorEntity, SensorEntity):
         self._device = device
         self._entry = entry
         self._index = int(index)
-        self._host = getattr(device, "host", "unknown")
-        base_name = getattr(device, "name", None) or f"OpenFAN Micro {self._host}"
-        # Use alias from options if present, otherwise default naming
+        url = getattr(device, "url", "")
+        self._host_id = urlparse(url).netloc or url or "unknown"
+        base_name = getattr(device, "name", None) or f"OpenFAN Micro {self._host_id}"
         fans_opts = (entry.options or {}).get("fans") or {}
         fan_opts = fans_opts.get(str(self._index)) or {}
         alias = fan_opts.get("alias", "").strip()
@@ -50,9 +51,9 @@ class OpenFanRpmSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_info = self._device.device_info()
         self._attr_entity_registry_visible_default = True
         if self._index == 0:
-            self._attr_unique_id = f"openfan_micro_rpm_{self._host}"
+            self._attr_unique_id = f"openfan_micro_rpm_{self._host_id}"
         else:
-            self._attr_unique_id = f"openfan_micro_rpm_{self._host}_{self._index}"
+            self._attr_unique_id = f"openfan_micro_rpm_{self._host_id}_{self._index}"
 
     @property
     def device_info(self) -> dict[str, Any] | None:
