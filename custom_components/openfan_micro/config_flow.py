@@ -6,15 +6,20 @@ We probe the device once to validate connectivity.
 
 from __future__ import annotations
 
+import logging
 import voluptuous as vol
 from typing import Any
 from urllib.parse import urlparse
+
+import aiohttp
 
 from homeassistant import config_entries, exceptions
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from ._device import OpenFanDevice
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class CannotConnect(exceptions.HomeAssistantError):
@@ -95,8 +100,24 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(
                 step_id="user", data_schema=DATA_SCHEMA, errors={"base": "invalid_url"}
             )
-        except Exception:
-            # Unknown error; show generic error code.
+        except (OSError, TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.warning(
+                "Cannot connect to OpenFAN device at %s: %s", user_input.get("url"), err
+            )
+            return self.async_show_form(
+                step_id="user", data_schema=DATA_SCHEMA, errors={"base": "cannot_connect"}
+            )
+        except Exception as err:
+            _LOGGER.exception(
+                "Error validating OpenFAN device at %s: %s", user_input.get("url"), err
+            )
+            return self.async_show_form(
+                step_id="user", data_schema=DATA_SCHEMA, errors={"base": "unknown"}
+            )
+        except Exception as err:
+            _LOGGER.exception(
+                "Error validating OpenFAN device at %s: %s", user_input.get("url"), err
+            )
             return self.async_show_form(
                 step_id="user", data_schema=DATA_SCHEMA, errors={"base": "unknown"}
             )
