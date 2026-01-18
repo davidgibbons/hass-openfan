@@ -1,6 +1,6 @@
 """Config Flow for OpenFAN Micro.
 
-Minimal UI flow: just ask for Host and optional Name.
+Minimal UI flow: just ask for URL and optional Name.
 We probe the device once to validate connectivity.
 """
 
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import voluptuous as vol
 from typing import Any
+from urllib.parse import urlparse
 
 from homeassistant import config_entries, exceptions
 from homeassistant.core import HomeAssistant
@@ -20,14 +21,41 @@ class CannotConnect(exceptions.HomeAssistantError):
     """Error to indicate we cannot connect."""
 
 
-DATA_SCHEMA = vol.Schema({vol.Required("host"): str, vol.Optional("name"): str})
+class InvalidUrl(exceptions.HomeAssistantError):
+    """Error to indicate the URL is invalid."""
+
+
+def _validate_url(url: str) -> str:
+    """Validate and normalize URL. Returns normalized URL or raises InvalidUrl."""
+    url = url.strip()
+    if not url:
+        raise InvalidUrl("URL is required")
+
+    # Add http:// if no scheme provided
+    if not url.startswith(("http://", "https://")):
+        url = f"http://{url}"
+
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        raise InvalidUrl("Invalid URL format")
+
+    # Normalize: remove trailing slash
+    return url.rstrip("/")
+
+
+DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required("url", description={"suggested_value": "http://192.168.1.100"}): str,
+        vol.Optional("name"): str,
+    }
+)
 
 
 async def _validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    host = data["host"].strip()
-    name = (data.get("name") or f"OpenFAN Micro {host}").strip()
+    url = _validate_url(data["url"])
+    name = (data.get("name") or f"OpenFAN Micro {url}").strip()
 
-    dev = OpenFanDevice(hass, host, name)
+    dev = OpenFanDevice(hass, url, name)
     # First refresh will fetch status once (raises on network error).
     await dev.async_first_refresh()
     rpm = 0
@@ -49,13 +77,13 @@ async def _validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str
     except Exception:
         fan_count = 1
 
-    return {"title": name, "host": host, "name": name, "rpm": rpm, "fan_count": fan_count}
+    return {"title": name, "url": url, "name": name, "rpm": rpm, "fan_count": fan_count}
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OpenFAN Micro."""
 
-    VERSION = 2  # Bumped for multi-fan options migration
+    VERSION = 3  # Bumped for host -> url migration
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         if user_input is None:
@@ -63,20 +91,24 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         try:
             info = await _validate_input(self.hass, user_input)
+        except InvalidUrl:
+            return self.async_show_form(
+                step_id="user", data_schema=DATA_SCHEMA, errors={"base": "invalid_url"}
+            )
         except Exception:
             # Unknown error; show generic error code.
             return self.async_show_form(
                 step_id="user", data_schema=DATA_SCHEMA, errors={"base": "unknown"}
             )
 
-        # Use host as unique_id (1 host = 1 device)
-        await self.async_set_unique_id(info["host"])
+        # Use URL as unique_id (1 URL = 1 device)
+        await self.async_set_unique_id(info["url"])
         self._abort_if_unique_id_configured()
 
         return self.async_create_entry(
             title=info["title"],
             data={
-                "host": info["host"],
+                "url": info["url"],
                 "name": info["name"],
                 "fan_count": info.get("fan_count", 1),
             },

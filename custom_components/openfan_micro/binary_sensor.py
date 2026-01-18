@@ -1,6 +1,7 @@
 """Stall detector binary sensor."""
 
 from __future__ import annotations
+from urllib.parse import urlparse
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -31,7 +32,8 @@ class OpenFanStallBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._device = device
         self._entry = entry
         self._index = int(index)
-        self._host = getattr(device, "host", "unknown")
+        url = getattr(device, "url", "")
+        self._host_id = urlparse(url).netloc or url or "unknown"
         base_name = getattr(device, "name", "OpenFAN Micro")
         # Use alias from options if present, otherwise default naming
         fans_opts = (entry.options or {}).get("fans") or {}
@@ -46,9 +48,9 @@ class OpenFanStallBinarySensor(CoordinatorEntity, BinarySensorEntity):
                 else f"{base_name} Fan {self._index + 1} Stall"
             )
         if self._index == 0:
-            self._attr_unique_id = f"openfan_micro_stall_{self._host}"
+            self._attr_unique_id = f"openfan_micro_stall_{self._host_id}"
         else:
-            self._attr_unique_id = f"openfan_micro_stall_{self._host}_{self._index}"
+            self._attr_unique_id = f"openfan_micro_stall_{self._host_id}_{self._index}"
         self._attr_device_info = self._device.device_info()
         self._attr_entity_registry_visible_default = True
 
