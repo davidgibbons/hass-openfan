@@ -62,7 +62,9 @@ class OpenFanDevice:
 
     async def async_first_refresh(self) -> None:
         """Initial status fetch (raises if network/API fails)."""
-        await self.coordinator.async_config_entry_first_refresh()
+        await self.coordinator.async_refresh()
+        if self.coordinator.last_exception:
+            raise self.coordinator.last_exception
 
     @property
     def mac(self) -> Optional[str]:
